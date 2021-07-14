@@ -21,6 +21,7 @@ import (
 	"runtime/pprof"
 	"strings"
 
+	east "github.com/engineerless/gofmt-import/pkg/ast"
 	"github.com/engineerless/gofmt-import/pkg/diff"
 )
 
@@ -114,7 +115,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		}
 	}
 
-	ast.SortImports(fileSet, file)
+	east.SortImports(fileSet, file)
 
 	if *simplifyAST {
 		simplify(file)
