@@ -11,6 +11,34 @@ import (
 	"strconv"
 )
 
+func RemoveBlankLines(fset *token.FileSet, f *ast.File) {
+	// Remove all blank lines
+	for _, d := range f.Decls {
+		d, ok := d.(*ast.GenDecl)
+		if !ok || d.Tok != token.IMPORT {
+			// Not an import declaration, so we're done.
+			// Imports are always first.
+			break
+		}
+		if !d.Lparen.IsValid() {
+			// Not a block: sorted by default.
+			continue
+		}
+		beginLine := lineAt(fset, d.Specs[0].Pos())
+		beginPos := d.Specs[0].Pos()
+		for _, s := range d.Specs {
+			line := lineAt(fset, s.Pos())
+			for line > beginLine+1 {
+				line--
+				fset.File(beginPos).MergeLine(line)
+			}
+			beginLine = lineAt(fset, s.Pos())
+			beginPos = s.Pos()
+		}
+
+	}
+}
+
 // SortImports sorts runs of consecutive import lines in import blocks in f.
 // It also removes duplicate imports when it is possible to do so without data loss.
 func SortImports(fset *token.FileSet, f *ast.File) {

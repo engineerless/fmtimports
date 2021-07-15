@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	east "github.com/engineerless/gofmt-import/pkg/ast"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -21,7 +22,6 @@ import (
 	"runtime/pprof"
 	"strings"
 
-	east "github.com/engineerless/gofmt-import/pkg/ast"
 	"github.com/engineerless/gofmt-import/pkg/diff"
 )
 
@@ -115,6 +115,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		}
 	}
 
+	east.RemoveBlankLines(fileSet, file)
 	east.SortImports(fileSet, file)
 
 	if *simplifyAST {
