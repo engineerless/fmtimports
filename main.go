@@ -160,14 +160,19 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 			continue
 		}
 
-		d.Specs = sortImportSpecs(fset, f, d.Specs)
+		d.Specs = sortImportSpecs(fset, f, d.Specs, posSpan{Start: d.Pos(), End: d.End()})
 	}
 }
 
-func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec) []ast.Spec {
-	startPos := specs[0].Pos()
-	line := fSet.Position(startPos).Line
+func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, importPos posSpan) []ast.Spec {
+	//
+	startPos := importPos.Start
+	line := fSet.Position(startPos).Line + 1 //
 	startFile := fSet.File(startPos)
+
+	startOffset := startFile.Offset(startPos)
+	importLines := make([]int, 0)
+	startOffset++
 
 	poses := make([]posSpan, 0)
 	for _, spec := range specs {
@@ -197,7 +202,9 @@ func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec) [
 			iSpec := spec.(*ast.ImportSpec)
 			if matched := pattern.MatchString(iSpec.Path.Value); matched {
 				specMatched[index] = true
-				sPos := startFile.LineStart(line)
+				importLines = append(importLines, startOffset)
+
+				sPos := token.Pos(startOffset + 1)
 
 				ePos := token.Pos(int(sPos) + (int(poses[index].End) - int(poses[index].Start)))
 				if iSpec.Name != nil {
@@ -206,12 +213,32 @@ func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec) [
 				iSpec.Path.ValuePos = sPos
 				iSpec.EndPos = ePos
 				specsRes = append(specsRes, iSpec)
+				startOffset = int(ePos)
 				line++
 			}
 
 		}
+		importLines = append(importLines, startOffset)
 		line++
+		startOffset++
 	}
+
+	startLineIndex := fSet.Position(startPos).Line
+	endLineIndex := fSet.Position(importPos.End).Line
+	fmt.Println(startLineIndex, endLineIndex)
+
+	// LineStart
+	lines := make([]int, 0)
+	for i := 1; i <= startLineIndex; i++ {
+		lines = append(lines, startFile.Offset(startFile.LineStart(i)))
+	}
+	lines = append(lines, importLines...)
+
+	for i := endLineIndex; i <= startFile.LineCount(); i++ {
+		lines = append(lines, startFile.Offset(startFile.LineStart(i)))
+	}
+
+	fSet.File(startPos).SetLines(lines)
 	return specsRes
 }
 
@@ -239,49 +266,6 @@ func walkDir(path string) {
 func main() {
 	gofmtMain()
 	os.Exit(exitCode)
-	//importAst, fset := parseFile("/Users/xinyang/Projects/kubernetes/gofmt-import/testdata/1.input")
-	//
-	//fmt.Println(importAst, fset)
-	//
-	//poses := make([]posSpan, len(importAst.Imports))
-	//
-	//startPos := importAst.Imports[0].Pos()
-	//startLine := fset.Position(startPos).Line
-	//startFile := fset.File(startPos)
-	//
-	//for _, imt := range importAst.Imports {
-	//	poses = append(poses, posSpan{
-	//		Start: imt.Pos(),
-	//		End:   imt.End(),
-	//	})
-	//}
-	//line := startLine
-	//for index, _ := range importAst.Imports {
-	//	sPos := startFile.LineStart(line)
-	//	line++
-	//
-	//	if index == 2 {
-	//		line++
-	//	}
-	//	ePos := token.Pos(int(sPos) + (int(poses[index].End) - int(poses[index].Start)))
-	//	if importAst.Imports[index].Name != nil {
-	//		importAst.Imports[index].Name.NamePos = sPos
-	//	}
-	//	importAst.Imports[index].Path.ValuePos = sPos
-	//	importAst.Imports[index].EndPos = ePos
-	//
-	//}
-	//
-	//var buf bytes.Buffer
-	//printer.Fprint(&buf, fset, importAst)
-	//
-	//s := buf.String()
-	//s = s[1 : len(s)-1]
-	//s = strings.TrimSpace(strings.ReplaceAll(s, "\n\t", "\n"))
-	//
-	//// Print the cleaned-up body text to stdout.
-	//fmt.Println(s)
-
 }
 
 func gofmtMain() {
