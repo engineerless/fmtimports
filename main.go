@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -94,6 +95,8 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		return err
 	}
 
+	sortImports(fileSet, astFile)
+
 	var buf bytes.Buffer
 	cfg := printer.Config{Mode: printerMode, Tabwidth: tabWidth}
 	err = cfg.Fprint(&buf, fileSet, astFile)
@@ -137,6 +140,79 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 	}
 
 	return err
+}
+
+func sortImports(fset *token.FileSet, f *ast.File) {
+	for _, d := range f.Decls {
+		d, ok := d.(*ast.GenDecl)
+		if !ok || d.Tok != token.IMPORT {
+			// Not an import declaration, so we're done.
+			// Imports are always first.
+			break
+		}
+
+		if !d.Lparen.IsValid() {
+			// Not a block: sorted by default.
+			continue
+		}
+
+		if len(d.Specs) <= 1 {
+			continue
+		}
+
+		d.Specs = sortImportSpecs(fset, f, d.Specs)
+	}
+}
+
+func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec) []ast.Spec {
+	startPos := specs[0].Pos()
+	line := fSet.Position(startPos).Line
+	startFile := fSet.File(startPos)
+
+	poses := make([]posSpan, 0)
+	for _, spec := range specs {
+		poses = append(poses, posSpan{
+			Start: spec.Pos(),
+			End:   spec.End(),
+		})
+	}
+	patterns := make([]*regexp.Regexp, 0)
+	for _, r := range []string{
+		`^"\w*"$`,
+		`^"github.*"$`,
+		`^".*"$`,
+	} {
+		p, _ := regexp.Compile(r)
+		patterns = append(patterns, p)
+	}
+
+	specsRes := make([]ast.Spec, 0)
+	specMatched := make([]bool, len(specs))
+
+	for _, pattern := range patterns {
+		for index, spec := range specs {
+			if specMatched[index] {
+				continue
+			}
+			iSpec := spec.(*ast.ImportSpec)
+			if matched := pattern.MatchString(iSpec.Path.Value); matched {
+				specMatched[index] = true
+				sPos := startFile.LineStart(line)
+
+				ePos := token.Pos(int(sPos) + (int(poses[index].End) - int(poses[index].Start)))
+				if iSpec.Name != nil {
+					iSpec.Name.NamePos = sPos
+				}
+				iSpec.Path.ValuePos = sPos
+				iSpec.EndPos = ePos
+				specsRes = append(specsRes, iSpec)
+				line++
+			}
+
+		}
+		line++
+	}
+	return specsRes
 }
 
 type posSpan struct {

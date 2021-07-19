@@ -1,23 +1,55 @@
 // package comment
 package main
-
+// must have empty lines
 import (
-	"fmt"
-	"math"
-	"errors"
-	// fsdfs
-	"log"
-	"io"
-
-	// dsfsfs
 
 
 
-	"test"
-	"github.com/sdfs"
-	"github.com/sdfs"
-	"k8s.com/adfsd"
-	"k8s.com/cfdvd"
-	"balance"
+	xx "fmt"
+    pp "github.com/sd"
+    "k8s.io/sd"
+
+
+
+
+
+
+
+
+)
+
+// wrong format
+import (
+
+
+
+	xx "fmt"
+    pp "github.com/sd"
+    "k8s.io/sd"
+        "k8s.io/sd"
+
+    "k8s.io/sd"
+
+    "k8s.io/sd"
+    "k8s.io/sd"
+    "k8s.io/sd"
+    "k8s.io/sd"
+    "k8s.io/sd"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 )
