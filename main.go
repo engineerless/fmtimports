@@ -1,14 +1,9 @@
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
 	"bytes"
 	"flag"
 	"fmt"
-	east "github.com/engineerless/gofmt-import/pkg/ast"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -16,29 +11,21 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/pprof"
 	"strings"
-
-	"github.com/engineerless/gofmt-import/pkg/diff"
 )
 
 var (
-	// main operation modes
-	list        = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
-	write       = flag.Bool("w", false, "write result to (source) file instead of stdout")
-	rewriteRule = flag.String("r", "", "rewrite rule (e.g., 'a[b:len(a)] -> a[b:]')")
-	simplifyAST = flag.Bool("s", false, "simplify code")
-	doDiff      = flag.Bool("d", false, "display diffs instead of rewriting files")
-	allErrors   = flag.Bool("e", false, "report all errors (not just the first 10 on different lines)")
-
-	// debugging
-	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to this file")
+	list      = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
+	doDiff    = flag.Bool("d", false, "display diffs instead of rewriting files")
+	write     = flag.Bool("w", false, "write result to (source) file instead of stdout")
+	allErrors = flag.Bool("e", false, "report all errors (not just the first 10 on different lines)")
 )
 
-// Keep these in sync with go/format/format.go.
 const (
 	tabWidth    = 8
 	printerMode = printer.UseSpaces | printer.TabIndent | printerNormalizeNumbers
@@ -63,7 +50,7 @@ func report(err error) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: gofmt [flags] [path ...]\n")
+	fmt.Fprintf(os.Stderr, "usage: gofmt-import [flags] [path ...]\n")
 	flag.PrintDefaults()
 }
 
@@ -102,30 +89,18 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		return err
 	}
 
-	file, sourceAdj, indentAdj, err := parse(fileSet, filename, src, stdin)
+	astFile, err := parser.ParseFile(fileSet, filename, src, parserMode)
 	if err != nil {
 		return err
 	}
 
-	if rewrite != nil {
-		if sourceAdj == nil {
-			file = rewrite(file)
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: rewrite ignored for incomplete programs\n")
-		}
-	}
-
-	east.RemoveBlankLines(fileSet, file)
-	east.SortImports(fileSet, file)
-
-	if *simplifyAST {
-		simplify(file)
-	}
-
-	res, err := format(fileSet, file, sourceAdj, indentAdj, src, printer.Config{Mode: printerMode, Tabwidth: tabWidth})
+	var buf bytes.Buffer
+	cfg := printer.Config{Mode: printerMode, Tabwidth: tabWidth}
+	err = cfg.Fprint(&buf, fileSet, astFile)
 	if err != nil {
 		return err
 	}
+	res := buf.Bytes()
 
 	if !bytes.Equal(src, res) {
 		// formatting has changed
@@ -153,11 +128,10 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 			if err != nil {
 				return fmt.Errorf("computing diff: %s", err)
 			}
-			fmt.Fprintf(out, "diff -u %s %s\n", filepath.ToSlash(filename+".orig"), filepath.ToSlash(filename))
+			fmt.Printf("diff -u %s %s\n", filepath.ToSlash(filename+".orig"), filepath.ToSlash(filename))
 			out.Write(data)
 		}
 	}
-
 	if !*list && !*write && !*doDiff {
 		_, err = out.Write(res)
 	}
@@ -165,45 +139,82 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 	return err
 }
 
+type posSpan struct {
+	Start token.Pos
+	End   token.Pos
+}
+
 func visitFile(path string, f fs.DirEntry, err error) error {
-	if err != nil || !isGoFile(f) {
-		return err
+	if err == nil && isGoFile(f) {
+		err = processFile(path, nil, os.Stdout, false)
 	}
-	if err := processFile(path, nil, os.Stdout, false); err != nil {
+	// Don't complain if a file was deleted in the meantime (i.e.
+	// the directory changed concurrently while running gofmt).
+	if err != nil && !os.IsNotExist(err) {
 		report(err)
 	}
 	return nil
 }
 
+func walkDir(path string) {
+	filepath.WalkDir(path, visitFile)
+}
+
 func main() {
-	// call gofmtMain in a separate function
-	// so that it can use defer and have them
-	// run before the exit.
 	gofmtMain()
 	os.Exit(exitCode)
+	//importAst, fset := parseFile("/Users/xinyang/Projects/kubernetes/gofmt-import/testdata/1.input")
+	//
+	//fmt.Println(importAst, fset)
+	//
+	//poses := make([]posSpan, len(importAst.Imports))
+	//
+	//startPos := importAst.Imports[0].Pos()
+	//startLine := fset.Position(startPos).Line
+	//startFile := fset.File(startPos)
+	//
+	//for _, imt := range importAst.Imports {
+	//	poses = append(poses, posSpan{
+	//		Start: imt.Pos(),
+	//		End:   imt.End(),
+	//	})
+	//}
+	//line := startLine
+	//for index, _ := range importAst.Imports {
+	//	sPos := startFile.LineStart(line)
+	//	line++
+	//
+	//	if index == 2 {
+	//		line++
+	//	}
+	//	ePos := token.Pos(int(sPos) + (int(poses[index].End) - int(poses[index].Start)))
+	//	if importAst.Imports[index].Name != nil {
+	//		importAst.Imports[index].Name.NamePos = sPos
+	//	}
+	//	importAst.Imports[index].Path.ValuePos = sPos
+	//	importAst.Imports[index].EndPos = ePos
+	//
+	//}
+	//
+	//var buf bytes.Buffer
+	//printer.Fprint(&buf, fset, importAst)
+	//
+	//s := buf.String()
+	//s = s[1 : len(s)-1]
+	//s = strings.TrimSpace(strings.ReplaceAll(s, "\n\t", "\n"))
+	//
+	//// Print the cleaned-up body text to stdout.
+	//fmt.Println(s)
+
 }
 
 func gofmtMain() {
 	flag.Usage = usage
 	flag.Parse()
 
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "creating cpu profile: %s\n", err)
-			exitCode = 2
-			return
-		}
-		defer f.Close()
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
-
 	initParserMode()
-	initRewrite()
 
-	args := flag.Args()
-	if len(args) == 0 {
+	if flag.NArg() == 0 {
 		if *write {
 			fmt.Fprintln(os.Stderr, "error: cannot use -w with standard input")
 			exitCode = 2
@@ -215,18 +226,15 @@ func gofmtMain() {
 		return
 	}
 
-	for _, arg := range args {
-		switch info, err := os.Stat(arg); {
+	for i := 0; i < flag.NArg(); i++ {
+		path := flag.Arg(i)
+		switch dir, err := os.Stat(path); {
 		case err != nil:
 			report(err)
-		case !info.IsDir():
-			// Non-directory arguments are always formatted.
-			if err := processFile(arg, nil, os.Stdout, false); err != nil {
-				report(err)
-			}
+		case dir.IsDir():
+			walkDir(path)
 		default:
-			// Directories are walked, ignoring non-Go files.
-			if err := filepath.WalkDir(arg, visitFile); err != nil {
+			if err := processFile(path, nil, os.Stdout, false); err != nil {
 				report(err)
 			}
 		}
@@ -234,11 +242,55 @@ func gofmtMain() {
 }
 
 func diffWithReplaceTempFile(b1, b2 []byte, filename string) ([]byte, error) {
-	data, err := diff.Diff("gofmt", b1, b2)
+	data, err := diff("gofmt", b1, b2)
 	if len(data) > 0 {
 		return replaceTempFilename(data, filename)
 	}
 	return data, err
+}
+
+// Returns diff of two arrays of bytes in diff tool format.
+func diff(prefix string, b1, b2 []byte) ([]byte, error) {
+	f1, err := writeTempFile(prefix, b1)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(f1)
+
+	f2, err := writeTempFile(prefix, b2)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(f2)
+
+	cmd := "diff"
+	if runtime.GOOS == "plan9" {
+		cmd = "/bin/ape/diff"
+	}
+
+	data, err := exec.Command(cmd, "-u", f1, f2).CombinedOutput()
+	if len(data) > 0 {
+		// diff exits with a non-zero status when the files don't match.
+		// Ignore that failure as long as we get output.
+		err = nil
+	}
+	return data, err
+}
+
+func writeTempFile(prefix string, data []byte) (string, error) {
+	file, err := ioutil.TempFile("", prefix)
+	if err != nil {
+		return "", err
+	}
+	_, err = file.Write(data)
+	if err1 := file.Close(); err == nil {
+		err = err1
+	}
+	if err != nil {
+		os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
 }
 
 // replaceTempFilename replaces temporary filenames in diff with actual one.
