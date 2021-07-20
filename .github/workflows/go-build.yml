@@ -23,4 +23,4 @@ jobs:
       run: go build -o gofmti main.go
 
     - name: Test
-      run: ./hack/test.sh
+      run: bash hack/test.sh
