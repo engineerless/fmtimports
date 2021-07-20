@@ -1,11 +1,11 @@
-# gofmt-import
+# fmtimports
 
 Tool for formatting golang import lines
 
 # Install
 
 ```shell
-go install github.com/engineerless/gofmt-import@latest
+go install github.com/engineerless/fmtimports@latest
 ```
 
 # Usage
@@ -13,7 +13,7 @@ go install github.com/engineerless/gofmt-import@latest
 ## Default mode
 
 ```shell
-./gofmt-import testdata/1.input
+./fmtimports testdata/1.input
 ```
 
 Before:
@@ -48,7 +48,7 @@ import (
 ## Regex
 
 ```shell
-./gofmt-import -r "^\"github.*\"$ ^\"k8s.*\"$"   testdata/1.input
+./fmtimports -r "^\"github.*\"$ ^\"k8s.*\"$"   testdata/1.input
 ```
 
 Before:
