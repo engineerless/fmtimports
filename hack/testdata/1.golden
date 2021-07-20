@@ -1,0 +1,10 @@
+package main
+
+import (
+	"fmt"
+
+	bar "github.com/bar"
+	foo "github.com/foo"
+	k8sbar "k8s.io/bar"
+	k8sfoo "k8s.io/foo"
+)

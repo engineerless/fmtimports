@@ -23,6 +23,7 @@ import (
 var (
 	list      = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
 	doDiff    = flag.Bool("d", false, "display diffs instead of rewriting files")
+	orderRule = flag.String("r", "", "order rule (e.g., '^\"github.*\"$ ^\"k8s.*\"$' )")
 	write     = flag.Bool("w", false, "write result to (source) file instead of stdout")
 	allErrors = flag.Bool("e", false, "report all errors (not just the first 10 on different lines)")
 )
@@ -39,10 +40,10 @@ const (
 )
 
 var (
-	fileSet    = token.NewFileSet() // per process FileSet
-	exitCode   = 0
-	rewrite    func(*ast.File) *ast.File
-	parserMode parser.Mode
+	fileSet      = token.NewFileSet() // per process FileSet
+	exitCode     = 0
+	rulePatterns = make([]*regexp.Regexp, 0)
+	parserMode   parser.Mode
 )
 
 func report(err error) {
@@ -60,6 +61,22 @@ func initParserMode() {
 	if *allErrors {
 		parserMode |= parser.AllErrors
 	}
+}
+
+func initRules() {
+	rulesStr := make([]string, 0)
+	rulesStr = append(rulesStr, `^"\w*"$`) // standard lib
+	if *orderRule != "" {
+		for _, r := range strings.Split(*orderRule, " ") {
+			rulesStr = append(rulesStr, r)
+		}
+	}
+	rulesStr = append(rulesStr, `^".*"$`)
+	for _, r := range rulesStr {
+		p, _ := regexp.Compile(r)
+		rulePatterns = append(rulePatterns, p)
+	}
+
 }
 
 func isGoFile(f fs.DirEntry) bool {
@@ -96,6 +113,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 	}
 
 	sortImports(fileSet, astFile)
+	ast.SortImports(fileSet, astFile)
 
 	var buf bytes.Buffer
 	cfg := printer.Config{Mode: printerMode, Tabwidth: tabWidth}
@@ -165,9 +183,9 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 }
 
 func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, importPos posSpan) []ast.Spec {
-	//
+
 	startPos := importPos.Start
-	line := fSet.Position(startPos).Line + 1 //
+	line := fSet.Position(startPos).Line + 1
 	startFile := fSet.File(startPos)
 
 	startOffset := startFile.Offset(startPos)
@@ -181,20 +199,11 @@ func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, i
 			End:   spec.End(),
 		})
 	}
-	patterns := make([]*regexp.Regexp, 0)
-	for _, r := range []string{
-		`^"\w*"$`,
-		`^"github.*"$`,
-		`^".*"$`,
-	} {
-		p, _ := regexp.Compile(r)
-		patterns = append(patterns, p)
-	}
 
 	specsRes := make([]ast.Spec, 0)
 	specMatched := make([]bool, len(specs))
 
-	for _, pattern := range patterns {
+	for _, pattern := range rulePatterns {
 		for index, spec := range specs {
 			if specMatched[index] {
 				continue
@@ -225,7 +234,6 @@ func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, i
 
 	startLineIndex := fSet.Position(startPos).Line
 	endLineIndex := fSet.Position(importPos.End).Line
-	fmt.Println(startLineIndex, endLineIndex)
 
 	// LineStart
 	lines := make([]int, 0)
@@ -273,7 +281,7 @@ func gofmtMain() {
 	flag.Parse()
 
 	initParserMode()
-
+	initRules()
 	if flag.NArg() == 0 {
 		if *write {
 			fmt.Fprintln(os.Stderr, "error: cannot use -w with standard input")
