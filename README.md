@@ -5,7 +5,7 @@ Tool for formatting golang import lines
 # Install
 
 ```shell
-go build -o gofmt-import github.com/engineerless/gofmt-import
+go install github.com/engineerless/gofmt-import@latest
 ```
 
 # Usage
@@ -58,8 +58,8 @@ package main
 
 import (
 	"fmt"
-	bar "github.com/bar"
-	foo "github.com/foo"
+	"github.com/bar"
+	"github.com/foo"
 	k8sbar "k8s.io/bar"
 	k8sfoo "k8s.io/foo"
 )
