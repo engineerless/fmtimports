@@ -1,3 +1,3 @@
-module github.com/xinydev/gofmt-import
+module github.com/xinydev/fmtimports
 
 go 1.16
