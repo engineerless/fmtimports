@@ -23,7 +23,7 @@ import (
 var (
 	list      = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
 	doDiff    = flag.Bool("d", false, "display diffs instead of rewriting files")
-	orderRule = flag.String("r", "", "order rule (e.g., '^\"github.*\"$ ^\"k8s.*\"$' )")
+	orderRule = flag.String("r", "", "order rule (e.g.'^\"[^.]*\"$ ^\"github.*\"$ ^\"k8s.*\"$',OTHERS(imports with no match) )")
 	write     = flag.Bool("w", false, "write result to (source) file instead of stdout")
 	allErrors = flag.Bool("e", false, "report all errors (not just the first 10 on different lines)")
 )
@@ -37,12 +37,15 @@ const (
 	//
 	// This value is defined in go/printer specifically for go/format and cmd/gofmt.
 	printerNormalizeNumbers = 1 << 30
+
+	// special keyword stand for imports with no match
+	importRuleOthers = "OTHERS"
 )
 
 var (
-	fileSet      = token.NewFileSet() // per process FileSet
 	exitCode     = 0
-	rulePatterns = make([]*regexp.Regexp, 0)
+	rulePatterns = make(map[string]*regexp.Regexp)
+	ruleStrList  = make([]string, 0)
 	parserMode   parser.Mode
 )
 
@@ -64,19 +67,25 @@ func initParserMode() {
 }
 
 func initRules() {
-	rulesStr := make([]string, 0)
-	rulesStr = append(rulesStr, `^"\w*"$`) // standard lib
+
+	p, _ := regexp.Compile(`^".*"$`)
+	rulePatterns[importRuleOthers] = p
+
+	othersExist := false
 	if *orderRule != "" {
 		for _, r := range strings.Split(*orderRule, " ") {
-			rulesStr = append(rulesStr, r)
+			ruleStrList = append(ruleStrList, r)
+			if r == importRuleOthers {
+				othersExist = true
+			} else {
+				p, _ := regexp.Compile(r)
+				rulePatterns[r] = p
+			}
 		}
 	}
-	rulesStr = append(rulesStr, `^".*"$`)
-	for _, r := range rulesStr {
-		p, _ := regexp.Compile(r)
-		rulePatterns = append(rulePatterns, p)
+	if !othersExist {
+		ruleStrList = append(ruleStrList, importRuleOthers)
 	}
-
 }
 
 func isGoFile(f fs.DirEntry) bool {
@@ -87,6 +96,8 @@ func isGoFile(f fs.DirEntry) bool {
 
 // If in == nil, the source is the contents of the file with the given filename.
 func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error {
+	fileSet := token.NewFileSet() // per file FileSet
+
 	var perm fs.FileMode = 0644
 	if in == nil {
 		f, err := os.Open(filename)
@@ -182,6 +193,20 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 	}
 }
 
+func isOthers(val string) bool {
+	for _, rule := range ruleStrList {
+		if rule == importRuleOthers {
+			continue
+		}
+		p := rulePatterns[rule]
+		if matched := p.MatchString(val); matched {
+			return false
+		}
+	}
+
+	return true
+}
+
 func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, importPos posSpan) []ast.Spec {
 
 	startPos := importPos.Start
@@ -203,12 +228,16 @@ func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, i
 	specsRes := make([]ast.Spec, 0)
 	specMatched := make([]bool, len(specs))
 
-	for _, pattern := range rulePatterns {
+	for _, rule := range ruleStrList {
 		for index, spec := range specs {
 			if specMatched[index] {
 				continue
 			}
 			iSpec := spec.(*ast.ImportSpec)
+			if importRuleOthers == rule && !isOthers(iSpec.Path.Value) {
+				continue
+			}
+			pattern := rulePatterns[rule]
 			if matched := pattern.MatchString(iSpec.Path.Value); matched {
 				specMatched[index] = true
 				importLines = append(importLines, startOffset)

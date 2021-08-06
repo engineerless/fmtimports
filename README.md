@@ -5,50 +5,15 @@ Tool for formatting golang import lines
 # Install
 
 ```shell
-go install github.com/engineerless/fmtimports@latest
+go install github.com/xinydev/fmtimports@latest
 ```
 
 # Usage
 
-## Default mode
-
-```shell
-./fmtimports testdata/1.input
-```
-
-Before:
-
-```go
-package main
-
-import (
-	"flag"
-	"fmt"
-	"fmt"
-	"github.com/bar"
-	"github.com/foo"
-)
-```
-
-After:
-
-```go
-package main
-
-import (
-	"bytes" // The first is standard libraries
-	"flag"
-	"fmt"
-
-	"github.com/bar" // The second is third-party libraries
-	"github.com/foo"
-)
-```
-
 ## Regex
 
 ```shell
-./fmtimports -r "^\"github.*\"$ ^\"k8s.*\"$"   testdata/1.input
+./fmtimports -r "^"[^.]*"$ ^\"github.*\"$ ^\"k8s.*\"$"   testdata/1.input
 ```
 
 Before:
