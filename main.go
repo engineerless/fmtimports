@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	list      = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
-	doDiff    = flag.Bool("d", false, "display diffs instead of rewriting files")
-	orderRule = flag.String("r", "", "order rule (e.g.'^\"[^.]*\"$ ^\"github.*\"$ ^\"k8s.*\"$',OTHERS(imports with no match) )")
-	write     = flag.Bool("w", false, "write result to (source) file instead of stdout")
-	allErrors = flag.Bool("e", false, "report all errors (not just the first 10 on different lines)")
+	list   = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
+	doDiff = flag.Bool("d", false, "display diffs instead of rewriting files")
+	write  = flag.Bool("w", false, "write result to (source) file instead of stdout")
+	// TODO: remove ignore-file when code-gen starts to generate ordered imports
+	ignoreFile = flag.String("ignore-file", "zz_generated", "files matching this regex are ignored")
 )
 
 const (
@@ -37,16 +37,13 @@ const (
 	//
 	// This value is defined in go/printer specifically for go/format and cmd/gofmt.
 	printerNormalizeNumbers = 1 << 30
-
-	// special keyword stand for imports with no match
-	importRuleOthers = "OTHERS"
 )
 
 var (
 	exitCode     = 0
 	rulePatterns = make(map[string]*regexp.Regexp)
 	ruleStrList  = make([]string, 0)
-	parserMode   parser.Mode
+	parserMode   = parser.ParseComments
 )
 
 func report(err error) {
@@ -57,35 +54,6 @@ func report(err error) {
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: gofmt-import [flags] [path ...]\n")
 	flag.PrintDefaults()
-}
-
-func initParserMode() {
-	parserMode = parser.ParseComments
-	if *allErrors {
-		parserMode |= parser.AllErrors
-	}
-}
-
-func initRules() {
-
-	p, _ := regexp.Compile(`^".*"$`)
-	rulePatterns[importRuleOthers] = p
-
-	othersExist := false
-	if *orderRule != "" {
-		for _, r := range strings.Split(*orderRule, " ") {
-			ruleStrList = append(ruleStrList, r)
-			if r == importRuleOthers {
-				othersExist = true
-			} else {
-				p, _ := regexp.Compile(r)
-				rulePatterns[r] = p
-			}
-		}
-	}
-	if !othersExist {
-		ruleStrList = append(ruleStrList, importRuleOthers)
-	}
 }
 
 func isGoFile(f fs.DirEntry) bool {
@@ -189,99 +157,92 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 			continue
 		}
 
-		d.Specs = sortImportSpecs(fset, f, d.Specs, posSpan{Start: d.Pos(), End: d.End()})
+		d.Specs = reorderImportSpecs(fset, d)
 	}
 }
 
-func isOthers(val string) bool {
-	for _, rule := range ruleStrList {
-		if rule == importRuleOthers {
-			continue
-		}
-		p := rulePatterns[rule]
-		if matched := p.MatchString(val); matched {
-			return false
-		}
-	}
+func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 
-	return true
-}
+	specs := d.Specs
+	start := d.Pos()
+	end := d.End()
 
-func sortImportSpecs(fSet *token.FileSet, astFile *ast.File, specs []ast.Spec, importPos posSpan) []ast.Spec {
+	var stdlibImports, localImports, k8sImports, externalImports []ast.Spec
 
-	startPos := importPos.Start
-	line := fSet.Position(startPos).Line + 1
-	startFile := fSet.File(startPos)
-
-	startOffset := startFile.Offset(startPos)
-	importLines := make([]int, 0)
-	startOffset++
-
-	poses := make([]posSpan, 0)
+	// split all imports into different groups
 	for _, spec := range specs {
-		poses = append(poses, posSpan{
-			Start: spec.Pos(),
-			End:   spec.End(),
-		})
-	}
+		imp := spec.(*ast.ImportSpec)
+		importPath := strings.Replace(imp.Path.Value, "\"", "", -1)
+		parts := strings.Split(importPath, "/")
 
-	specsRes := make([]ast.Spec, 0)
-	specMatched := make([]bool, len(specs))
-
-	for _, rule := range ruleStrList {
-		for index, spec := range specs {
-			if specMatched[index] {
-				continue
-			}
-			iSpec := spec.(*ast.ImportSpec)
-			if importRuleOthers == rule && !isOthers(iSpec.Path.Value) {
-				continue
-			}
-			pattern := rulePatterns[rule]
-			if matched := pattern.MatchString(iSpec.Path.Value); matched {
-				specMatched[index] = true
-				importLines = append(importLines, startOffset)
-
-				sPos := token.Pos(startOffset + 1)
-
-				ePos := token.Pos(int(sPos) + (int(poses[index].End) - int(poses[index].Start)))
-				if iSpec.Name != nil {
-					iSpec.Name.NamePos = sPos
-				}
-				iSpec.Path.ValuePos = sPos
-				iSpec.EndPos = ePos
-				specsRes = append(specsRes, iSpec)
-				startOffset = int(ePos)
-				line++
-			}
-
+		if !strings.Contains(parts[0], ".") {
+			// standard library
+			stdlibImports = append(stdlibImports, spec)
+		} else if strings.HasPrefix(importPath, "k8s.io/kubernetes") {
+			// local imports
+			localImports = append(localImports, spec)
+		} else if strings.Contains(parts[0], "k8s.io") {
+			// other *.k8s.io imports
+			k8sImports = append(k8sImports, spec)
+		} else {
+			// external repositories
+			externalImports = append(externalImports, spec)
 		}
-		importLines = append(importLines, startOffset)
-		line++
-		startOffset++
 	}
 
-	startLineIndex := fSet.Position(startPos).Line
-	endLineIndex := fSet.Position(importPos.End).Line
+	// reset each import's start and end position
+	orderedImports := make([]ast.Spec, 0)
+	impLines := make([]int, 0)
+	offset := fSet.File(start).Offset(start) + 1
 
-	// LineStart
+	for _, gImps := range [][]ast.Spec{
+		stdlibImports,
+		externalImports,
+		k8sImports,
+		localImports,
+	} {
+		for _, spec := range gImps {
+			imp := spec.(*ast.ImportSpec)
+
+			impLines = append(impLines, offset)
+
+			sPos := token.Pos(offset + 1)
+			ePos := token.Pos(int(sPos) + (int(imp.End()) - int(imp.Pos())))
+			if imp.Name != nil {
+				imp.Name.NamePos = sPos
+			}
+			imp.Path.ValuePos = sPos
+			imp.EndPos = ePos
+			orderedImports = append(orderedImports, imp)
+
+			offset = int(ePos)
+		}
+		// add black lines
+		if len(gImps) != 0 {
+			impLines = append(impLines, offset)
+			offset++
+		}
+	}
+
+	// reset lines(only import parts) for the File,since we may have added new blank lines
+	impStartLineIndex := fSet.Position(start).Line
+	impEndLineIndex := fSet.Position(end).Line
+
 	lines := make([]int, 0)
-	for i := 1; i <= startLineIndex; i++ {
-		lines = append(lines, startFile.Offset(startFile.LineStart(i)))
-	}
-	lines = append(lines, importLines...)
-
-	for i := endLineIndex; i <= startFile.LineCount(); i++ {
-		lines = append(lines, startFile.Offset(startFile.LineStart(i)))
+	impFile := fSet.File(start)
+	for i := 1; i <= impStartLineIndex; i++ {
+		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
 
-	fSet.File(startPos).SetLines(lines)
-	return specsRes
-}
+	lines = append(lines, impLines...)
 
-type posSpan struct {
-	Start token.Pos
-	End   token.Pos
+	for i := impEndLineIndex; i <= impFile.LineCount(); i++ {
+		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
+	}
+
+	impFile.SetLines(lines)
+	return orderedImports
+
 }
 
 func visitFile(path string, f fs.DirEntry, err error) error {
@@ -301,6 +262,9 @@ func walkDir(path string) {
 }
 
 func main() {
+	// call gofmtMain in a separate function
+	// so that it can use defer and have them
+	// run before the exit.
 	gofmtMain()
 	os.Exit(exitCode)
 }
@@ -309,8 +273,6 @@ func gofmtMain() {
 	flag.Usage = usage
 	flag.Parse()
 
-	initParserMode()
-	initRules()
 	if flag.NArg() == 0 {
 		if *write {
 			fmt.Fprintln(os.Stderr, "error: cannot use -w with standard input")

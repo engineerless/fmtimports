@@ -15,5 +15,7 @@
 vendor/
 
 .idea/
-gofmt-import
+fmtimports
 *.output
+
+fmt
