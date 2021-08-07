@@ -15,8 +15,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -40,10 +40,8 @@ const (
 )
 
 var (
-	exitCode     = 0
-	rulePatterns = make(map[string]*regexp.Regexp)
-	ruleStrList  = make([]string, 0)
-	parserMode   = parser.ParseComments
+	exitCode   = 0
+	parserMode = parser.ParseComments
 )
 
 func report(err error) {
@@ -91,8 +89,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		return err
 	}
 
-	sortImports(fileSet, astFile)
-	ast.SortImports(fileSet, astFile)
+	fileSet = sortImports(fileSet, astFile)
 
 	var buf bytes.Buffer
 	cfg := printer.Config{Mode: printerMode, Tabwidth: tabWidth}
@@ -139,7 +136,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 	return err
 }
 
-func sortImports(fset *token.FileSet, f *ast.File) {
+func sortImports(fset *token.FileSet, f *ast.File) *token.FileSet {
 	for _, d := range f.Decls {
 		d, ok := d.(*ast.GenDecl)
 		if !ok || d.Tok != token.IMPORT {
@@ -157,56 +154,65 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 			continue
 		}
 
-		d.Specs = reorderImportSpecs(fset, d)
+		specs, lines := reorderImportSpecs(fset, d)
+		d.Specs = specs
+		newSet := token.NewFileSet()
+		oldFile := fset.File(d.Pos())
+		newSet.AddFile(oldFile.Name(), -1, lines[len(lines)-1]+1).SetLines(lines)
+		fset = newSet
 	}
+	return fset
 }
 
-func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
+func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) ([]ast.Spec, []int) {
 
 	specs := d.Specs
 	start := d.Pos()
 	end := d.End()
 
-	var stdlibImports, localImports, k8sImports, externalImports []ast.Spec
+	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
 
 	// split all imports into different groups
 	for _, spec := range specs {
 		imp := spec.(*ast.ImportSpec)
 		importPath := strings.Replace(imp.Path.Value, "\"", "", -1)
 		parts := strings.Split(importPath, "/")
-
 		if !strings.Contains(parts[0], ".") {
 			// standard library
-			stdlibImports = append(stdlibImports, spec)
+			stdlibImports = append(stdlibImports, imp)
 		} else if strings.HasPrefix(importPath, "k8s.io/kubernetes") {
 			// local imports
-			localImports = append(localImports, spec)
+			localImports = append(localImports, imp)
 		} else if strings.Contains(parts[0], "k8s.io") {
 			// other *.k8s.io imports
-			k8sImports = append(k8sImports, spec)
+			k8sImports = append(k8sImports, imp)
 		} else {
 			// external repositories
-			externalImports = append(externalImports, spec)
+			externalImports = append(externalImports, imp)
 		}
 	}
 
 	// reset each import's start and end position
 	orderedImports := make([]ast.Spec, 0)
 	impLines := make([]int, 0)
-	offset := fSet.File(start).Offset(start) + 1
 
-	for _, gImps := range [][]ast.Spec{
+	// Pos() of the line next `import (`
+	offset := fSet.File(start).Offset(fSet.File(start).LineStart(fSet.File(start).Line(start) + 1))
+
+	for _, gImps := range [][]*ast.ImportSpec{
 		stdlibImports,
 		externalImports,
 		k8sImports,
 		localImports,
 	} {
-		for _, spec := range gImps {
-			imp := spec.(*ast.ImportSpec)
+		sort.SliceStable(gImps, func(i, j int) bool {
+			return gImps[i].Path.Value < gImps[j].Path.Value
+		})
 
+		for _, imp := range gImps {
 			impLines = append(impLines, offset)
-
-			sPos := token.Pos(offset + 1)
+			// calculate and set new startPos,endPos for import spec
+			sPos := token.Pos(offset + 2)
 			ePos := token.Pos(int(sPos) + (int(imp.End()) - int(imp.Pos())))
 			if imp.Name != nil {
 				imp.Name.NamePos = sPos
@@ -223,25 +229,27 @@ func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 			offset++
 		}
 	}
-
-	// reset lines(only import parts) for the File,since we may have added new blank lines
-	impStartLineIndex := fSet.Position(start).Line
-	impEndLineIndex := fSet.Position(end).Line
+	// update line offset table,since we may have added new blank lines
+	// the line is `import (`
+	impStartLine := fSet.Position(start).Line
+	// the line after `)`
+	impEndLine := fSet.Position(end).Line
 
 	lines := make([]int, 0)
 	impFile := fSet.File(start)
-	for i := 1; i <= impStartLineIndex; i++ {
+	for i := 1; i <= impStartLine; i++ {
 		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
 
 	lines = append(lines, impLines...)
 
-	for i := impEndLineIndex; i <= impFile.LineCount(); i++ {
-		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
+	diffInt := impLines[len(impLines)-1] - impFile.Offset(impFile.LineStart(impEndLine))
+
+	for i := impEndLine + 1; i <= impFile.LineCount(); i++ {
+		lines = append(lines, impFile.Offset(impFile.LineStart(i))+diffInt)
 	}
 
-	impFile.SetLines(lines)
-	return orderedImports
+	return orderedImports, lines
 
 }
 
