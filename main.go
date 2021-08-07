@@ -165,17 +165,10 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 }
 
 func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
-
-	specs := d.Specs
-	start := d.Pos()
-	end := d.End()
-	impFile := fSet.File(start)
-
 	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
 
 	// split all imports into different groups
-
-	for _, spec := range specs {
+	for _, spec := range d.Specs {
 		imp := spec.(*ast.ImportSpec)
 		importPath := strings.Replace(imp.Path.Value, "\"", "", -1)
 		parts := strings.Split(importPath, "/")
@@ -195,13 +188,12 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	}
 
 	// reset each import's start, end position and line offset
-
 	orderedImports := make([]ast.Spec, 0)
 	// line offset table of imports
 	impLines := make([]int, 0)
-
+	impFile := fSet.File(d.Pos())
 	// offset of the line next "import ("
-	offset := impFile.Offset(impFile.LineStart(impFile.Line(start) + 1))
+	offset := impFile.Offset(impFile.LineStart(impFile.Line(d.Pos()) + 1))
 
 	for _, gImps := range [][]*ast.ImportSpec{
 		stdlibImports,
@@ -259,9 +251,9 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	// update line offset table,first copy the offsets before import declaration,
 	// then insert offsets we updated(may have new lines),finally copy the rest
 	// impStartLine: the start line of import declaration ( "import (" )
-	impStartLine := fSet.Position(start).Line
+	impStartLine := fSet.Position(d.Pos()).Line
 	// impEndLine: the line after import declaration( ")" )
-	impEndLine := fSet.Position(end).Line
+	impEndLine := fSet.Position(d.End()).Line
 
 	lines := make([]int, 0)
 	for i := 1; i <= impStartLine; i++ {
@@ -273,7 +265,6 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	}
 	impFile.SetLines(lines)
 	return orderedImports
-
 }
 
 func visitFile(path string, f fs.DirEntry, err error) error {
