@@ -2,6 +2,16 @@
 
 Tool for formatting golang import lines
 
+```
+stdlib
+
+imports outside of *.k8s.io
+
+*.k8s.io (non local repository)
+
+local repository (k8s.io/kubernetes/.*)
+```
+
 # Install
 
 ```shell
@@ -10,10 +20,22 @@ go install github.com/xinydev/fmtimports@latest
 
 # Usage
 
-## Regex
+```shell
+fmtimports --help
+
+usage: gofmt-import [flags] [path ...]
+  -d    display diffs instead of rewriting files
+  -ignore-file string
+        files with this string in the file name will be ignored (default "zz_generated")
+  -l    list files whose formatting differs from gofmt's
+  -w    write result to (source) file instead of stdout
+
+```
+
+# Example
 
 ```shell
-./fmtimports -r "^"[^.]*"$ ^\"github.*\"$ ^\"k8s.*\"$"   testdata/1.input
+./fmtimports testdata/1.input
 ```
 
 Before:
@@ -22,11 +44,18 @@ Before:
 package main
 
 import (
+	bootstraptokenv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/bootstraptoken/v1"
+	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
+
+	fuzz "github.com/google/gofuzz"
+	fuzz2 "github.com/google/gofuzz2"
+	"os"
 	"fmt"
-	"github.com/bar"
-	"github.com/foo"
-	k8sbar "k8s.io/bar"
-	k8sfoo "k8s.io/foo"
 )
 
 ```
@@ -37,13 +66,19 @@ After:
 package main
 
 import (
-	"fmt" // The first is standard libraries
+	"fmt"
+	"os"
 
-	"github.com/bar" // imports which match ^\"github.*\"$
-	"github.com/foo"
+	fuzz "github.com/google/gofuzz"
+	fuzz2 "github.com/google/gofuzz2"
 
-	k8sbar "k8s.io/bar" // imports which match ^\"k8s.*\"$
-	k8sfoo "k8s.io/foo"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
+
+	bootstraptokenv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/bootstraptoken/v1"
+	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 )
 
 ```

@@ -25,7 +25,7 @@ var (
 	doDiff = flag.Bool("d", false, "display diffs instead of rewriting files")
 	write  = flag.Bool("w", false, "write result to (source) file instead of stdout")
 	// TODO: remove ignore-file flag when code-gen starts to generate ordered imports
-	ignoreFile = flag.String("ignore-file", "zz_generated", "files matching this regex are ignored")
+	ignoreFile = flag.String("ignore-file", "zz_generated", "files with this string in the file name will be ignored")
 )
 
 const (
@@ -55,7 +55,7 @@ func usage() {
 }
 
 func filterFile(f fs.DirEntry) bool {
-	// ignore non-Go files and files matching ignoreFile
+	// ignore non-Go files and files matching ignoreFile flag
 	name := f.Name()
 	if f.IsDir() ||
 		strings.HasPrefix(name, ".") ||
@@ -152,18 +152,15 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 			// Imports are always first.
 			break
 		}
-
 		if !d.Lparen.IsValid() {
 			// Not a block: sorted by default.
 			continue
 		}
-
 		if len(d.Specs) <= 1 {
 			continue
 		}
 
 		d.Specs = sortDecl(fset, d)
-
 	}
 }
 
@@ -172,6 +169,7 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	specs := d.Specs
 	start := d.Pos()
 	end := d.End()
+	impFile := fSet.File(start)
 
 	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
 
@@ -200,7 +198,7 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	impLines := make([]int, 0)
 
 	// Pos() of the line next `import (`
-	offset := fSet.File(start).Offset(fSet.File(start).LineStart(fSet.File(start).Line(start) + 1))
+	offset := impFile.Offset(impFile.LineStart(impFile.Line(start) + 1))
 
 	for _, gImps := range [][]*ast.ImportSpec{
 		stdlibImports,
@@ -232,20 +230,18 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 			offset++
 		}
 	}
-	// update line offset table,since we may have added new blank lines
-	// the line is `import (`
+
+	// update line offset table, since we may have added new blank lines
+	// impStartLine: the line of `import (`
 	impStartLine := fSet.Position(start).Line
-	// the line after `)`
+	// impEndLine: the line after `)`
 	impEndLine := fSet.Position(end).Line
 
 	lines := make([]int, 0)
-	impFile := fSet.File(start)
 	for i := 1; i <= impStartLine; i++ {
 		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
-
 	lines = append(lines, impLines...)
-
 	for i := impEndLine + 1; i <= impFile.LineCount(); i++ {
 		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
