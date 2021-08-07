@@ -50,7 +50,7 @@ func report(err error) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: gofmt-import [flags] [path ...]\n")
+	fmt.Fprintf(os.Stderr, "usage: fmtimports [flags] [path ...]\n")
 	flag.PrintDefaults()
 }
 
@@ -174,6 +174,7 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
 
 	// split all imports into different groups
+
 	for _, spec := range specs {
 		imp := spec.(*ast.ImportSpec)
 		importPath := strings.Replace(imp.Path.Value, "\"", "", -1)
@@ -193,11 +194,13 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 		}
 	}
 
-	// reset each import's start and end position
+	// reset each import's start, end position and line offset
+
 	orderedImports := make([]ast.Spec, 0)
+	// line offset table of imports
 	impLines := make([]int, 0)
 
-	// Pos() of the line next `import (`
+	// offset of the line next "import ("
 	offset := impFile.Offset(impFile.LineStart(impFile.Line(start) + 1))
 
 	for _, gImps := range [][]*ast.ImportSpec{
@@ -224,17 +227,18 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 
 			offset = int(ePos)
 		}
-		// add black lines
+		// add a blank line between each group
 		if len(gImps) != 0 {
 			impLines = append(impLines, offset)
 			offset++
 		}
 	}
 
-	// update line offset table, since we may have added new blank lines
-	// impStartLine: the line of `import (`
+	// update line offset table,first copy the offsets before import declaration,
+	// then insert offsets we updated(may have new lines),finally copy the rest
+	// impStartLine: the start line of import declaration ( "import (" )
 	impStartLine := fSet.Position(start).Line
-	// impEndLine: the line after `)`
+	// impEndLine: the line after import declaration( ")" )
 	impEndLine := fSet.Position(end).Line
 
 	lines := make([]int, 0)
