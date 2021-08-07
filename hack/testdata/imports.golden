@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/gofuzz"
-	"github.com/pkg/errors" // gofuzz
+	"github.com/google/gofuzz" // gofuzz
+	"github.com/pkg/errors"
 )
 
 import (

@@ -159,7 +159,7 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 		if len(d.Specs) <= 1 {
 			continue
 		}
-
+		f.Comments = nil
 		d.Specs = sortDecl(fset, d)
 	}
 }
@@ -218,14 +218,37 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 			// calculate and set new startPos,endPos for import spec
 			sPos := token.Pos(offset + 1)
 			ePos := token.Pos(int(sPos) + (int(imp.End()) - int(imp.Pos())))
+			offset = int(ePos)
 			if imp.Name != nil {
 				imp.Name.NamePos = sPos
 			}
+
+			if imp.Comment != nil || imp.Doc != nil {
+				cmt := ast.Comment{
+					Slash: ePos + 1,
+				}
+				l := 0
+				for _, cg := range []*ast.CommentGroup{
+					imp.Doc,
+					imp.Comment,
+				} {
+					if cg != nil {
+						for _, c := range cg.List {
+							cmt.Text += c.Text
+							l += int(c.End()) - int(c.Pos())
+						}
+					}
+				}
+				imp.Doc = nil
+				imp.Comment = &ast.CommentGroup{
+					List: []*ast.Comment{&cmt},
+				}
+				offset += l
+			}
+
 			imp.Path.ValuePos = sPos
 			imp.EndPos = ePos
 			orderedImports = append(orderedImports, imp)
-
-			offset = int(ePos)
 		}
 		// add a blank line between each group
 		if len(gImps) != 0 {
