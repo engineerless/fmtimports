@@ -20,6 +20,9 @@ func TestReorder(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// add larger examples
+	match = append(match, "main.go", "main_test.go")
+
 	for _, in := range match {
 		out := in // for files where input and output are identical
 		if strings.HasSuffix(in, ".input") {

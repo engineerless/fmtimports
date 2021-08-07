@@ -159,15 +159,13 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 		if len(d.Specs) <= 1 {
 			continue
 		}
-		f.Comments = nil
-		d.Specs = sortDecl(fset, d)
+		d.Specs = sortDecl(fset, f, d)
 	}
 }
 
-func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
-	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
-
+func sortDecl(fSet *token.FileSet, f *ast.File, d *ast.GenDecl) []ast.Spec {
 	// split all imports into different groups
+	var stdlibImports, localImports, k8sImports, externalImports []*ast.ImportSpec
 	for _, spec := range d.Specs {
 		imp := spec.(*ast.ImportSpec)
 		importPath := strings.Replace(imp.Path.Value, "\"", "", -1)
@@ -187,13 +185,28 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 		}
 	}
 
-	// reset each import's start, end position and line offset
+	// remove comments within imports declaration, will add it back later
+	if f.Comments != nil {
+		cgs := make([]*ast.CommentGroup, 0)
+		for _, cg := range f.Comments {
+			ncg := ast.CommentGroup{}
+			for _, c := range cg.List {
+				if !(d.Pos() <= c.Pos() && c.Pos() <= d.End()) {
+					ncg.List = append(ncg.List, c)
+				}
+			}
+			if len(ncg.List) != 0 {
+				cgs = append(cgs, &ncg)
+			}
+		}
+		f.Comments = cgs
+	}
+
+	// set each import's position, line offset and comments
 	orderedImports := make([]ast.Spec, 0)
-	// line offset table of imports
-	impLines := make([]int, 0)
+	impLines := make([]int, 0) // line offset table of imports
 	impFile := fSet.File(d.Pos())
-	// offset of the line next "import ("
-	offset := impFile.Offset(impFile.LineStart(impFile.Line(d.Pos()) + 1))
+	offset := impFile.Offset(impFile.LineStart(impFile.Line(d.Pos()) + 1)) // offset of the line next import keyword
 
 	for _, gImps := range [][]*ast.ImportSpec{
 		stdlibImports,
@@ -236,6 +249,7 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 						Text:  text,
 					}},
 				}
+				f.Comments = append(f.Comments, imp.Comment)
 				offset = int(imp.Comment.End())
 			}
 
@@ -247,13 +261,14 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 			offset++
 		}
 	}
+	sort.Slice(f.Comments, func(i, j int) bool {
+		return f.Comments[i].Pos() < f.Comments[j].Pos()
+	})
 
-	// update line offset table,first copy the offsets before import declaration,
-	// then insert offsets we updated(may have new lines),finally copy the rest
-	// impStartLine: the start line of import declaration ( "import (" )
-	impStartLine := fSet.Position(d.Pos()).Line
-	// impEndLine: the line after import declaration( ")" )
-	impEndLine := fSet.Position(d.End()).Line
+	// update line offset table, first copy the offsets before import declaration,
+	// then insert offsets we updated(may have new lines), finally copy the rest
+	impStartLine := fSet.Position(d.Pos()).Line // line of the import keyword
+	impEndLine := fSet.Position(d.End()).Line   // line after the import declaration
 
 	lines := make([]int, 0)
 	for i := 1; i <= impStartLine; i++ {
