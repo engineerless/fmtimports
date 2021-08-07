@@ -21,4 +21,4 @@ jobs:
       run: go build -o fmtimports main.go
 
     - name: Test
-      run: bash hack/test.sh
+      run: go test
