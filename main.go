@@ -24,7 +24,7 @@ var (
 	list   = flag.Bool("l", false, "list files whose formatting differs from gofmt's")
 	doDiff = flag.Bool("d", false, "display diffs instead of rewriting files")
 	write  = flag.Bool("w", false, "write result to (source) file instead of stdout")
-	// TODO: remove ignore-file when code-gen starts to generate ordered imports
+	// TODO: remove ignore-file flag when code-gen starts to generate ordered imports
 	ignoreFile = flag.String("ignore-file", "zz_generated", "files matching this regex are ignored")
 )
 
@@ -54,10 +54,18 @@ func usage() {
 	flag.PrintDefaults()
 }
 
-func isGoFile(f fs.DirEntry) bool {
-	// ignore non-Go files
+func filterFile(f fs.DirEntry) bool {
+	// ignore non-Go files and files matching ignoreFile
 	name := f.Name()
-	return !f.IsDir() && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".go")
+	if f.IsDir() ||
+		strings.HasPrefix(name, ".") ||
+		!strings.HasSuffix(name, ".go") {
+		return true
+	}
+	if *ignoreFile != "" && strings.Contains(name, *ignoreFile) {
+		return true
+	}
+	return false
 }
 
 // If in == nil, the source is the contents of the file with the given filename.
@@ -154,12 +162,12 @@ func sortImports(fset *token.FileSet, f *ast.File) {
 			continue
 		}
 
-		d.Specs = reorderImportSpecs(fset, d)
+		d.Specs = sortDecl(fset, d)
 
 	}
 }
 
-func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
+func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 
 	specs := d.Specs
 	start := d.Pos()
@@ -248,7 +256,7 @@ func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 }
 
 func visitFile(path string, f fs.DirEntry, err error) error {
-	if err == nil && isGoFile(f) {
+	if err == nil && !filterFile(f) {
 		err = processFile(path, nil, os.Stdout, false)
 	}
 	// Don't complain if a file was deleted in the meantime (i.e.
