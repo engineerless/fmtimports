@@ -89,7 +89,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 		return err
 	}
 
-	fileSet = sortImports(fileSet, astFile)
+	sortImports(fileSet, astFile)
 
 	var buf bytes.Buffer
 	cfg := printer.Config{Mode: printerMode, Tabwidth: tabWidth}
@@ -136,7 +136,7 @@ func processFile(filename string, in io.Reader, out io.Writer, stdin bool) error
 	return err
 }
 
-func sortImports(fset *token.FileSet, f *ast.File) *token.FileSet {
+func sortImports(fset *token.FileSet, f *ast.File) {
 	for _, d := range f.Decls {
 		d, ok := d.(*ast.GenDecl)
 		if !ok || d.Tok != token.IMPORT {
@@ -154,17 +154,12 @@ func sortImports(fset *token.FileSet, f *ast.File) *token.FileSet {
 			continue
 		}
 
-		specs, lines := reorderImportSpecs(fset, d)
-		d.Specs = specs
-		newSet := token.NewFileSet()
-		oldFile := fset.File(d.Pos())
-		newSet.AddFile(oldFile.Name(), -1, lines[len(lines)-1]+1).SetLines(lines)
-		fset = newSet
+		d.Specs = reorderImportSpecs(fset, d)
+
 	}
-	return fset
 }
 
-func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) ([]ast.Spec, []int) {
+func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 
 	specs := d.Specs
 	start := d.Pos()
@@ -212,7 +207,7 @@ func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) ([]ast.Spec, []int)
 		for _, imp := range gImps {
 			impLines = append(impLines, offset)
 			// calculate and set new startPos,endPos for import spec
-			sPos := token.Pos(offset + 2)
+			sPos := token.Pos(offset + 1)
 			ePos := token.Pos(int(sPos) + (int(imp.End()) - int(imp.Pos())))
 			if imp.Name != nil {
 				imp.Name.NamePos = sPos
@@ -243,13 +238,12 @@ func reorderImportSpecs(fSet *token.FileSet, d *ast.GenDecl) ([]ast.Spec, []int)
 
 	lines = append(lines, impLines...)
 
-	diffInt := impLines[len(impLines)-1] - impFile.Offset(impFile.LineStart(impEndLine))
-
 	for i := impEndLine + 1; i <= impFile.LineCount(); i++ {
-		lines = append(lines, impFile.Offset(impFile.LineStart(i))+diffInt)
+		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
 
-	return orderedImports, lines
+	impFile.SetLines(lines)
+	return orderedImports
 
 }
 
