@@ -218,36 +218,35 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 			// calculate and set new startPos,endPos for import spec
 			sPos := token.Pos(offset + 1)
 			ePos := token.Pos(int(sPos) + (int(imp.End()) - int(imp.Pos())))
-			offset = int(ePos)
 			if imp.Name != nil {
 				imp.Name.NamePos = sPos
 			}
-
-			if imp.Comment != nil || imp.Doc != nil {
-				cmt := ast.Comment{
-					Slash: ePos + 1,
-				}
-				l := 0
-				for _, cg := range []*ast.CommentGroup{
-					imp.Doc,
-					imp.Comment,
-				} {
-					if cg != nil {
-						for _, c := range cg.List {
-							cmt.Text += c.Text
-							l += int(c.End()) - int(c.Pos())
-						}
-					}
-				}
-				imp.Doc = nil
-				imp.Comment = &ast.CommentGroup{
-					List: []*ast.Comment{&cmt},
-				}
-				offset += l
-			}
-
 			imp.Path.ValuePos = sPos
 			imp.EndPos = ePos
+			offset = int(ePos)
+
+			text := "" // comment text
+			if imp.Comment != nil {
+				for _, c := range imp.Comment.List {
+					text += c.Text
+				}
+			}
+			if imp.Doc != nil {
+				for _, d := range imp.Doc.List {
+					text += d.Text
+				}
+			}
+			if text != "" {
+				imp.Doc = nil
+				imp.Comment = &ast.CommentGroup{
+					List: []*ast.Comment{{
+						Slash: ePos + 1,
+						Text:  text,
+					}},
+				}
+				offset = int(imp.Comment.End())
+			}
+
 			orderedImports = append(orderedImports, imp)
 		}
 		// add a blank line between each group
@@ -272,7 +271,6 @@ func sortDecl(fSet *token.FileSet, d *ast.GenDecl) []ast.Spec {
 	for i := impEndLine + 1; i <= impFile.LineCount(); i++ {
 		lines = append(lines, impFile.Offset(impFile.LineStart(i)))
 	}
-
 	impFile.SetLines(lines)
 	return orderedImports
 
