@@ -15,7 +15,7 @@ var update = flag.Bool("update", false, "update .golden files")
 
 func TestReorder(t *testing.T) {
 	// determine input files
-	match, err := filepath.Glob("hack/testdata/*.input")
+	match, err := filepath.Glob("testdata/*.input")
 	if err != nil {
 		t.Fatal(err)
 	}
