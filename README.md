@@ -1,5 +1,7 @@
 # fmtimports
 
+For K8s related projects, please use https://github.com/kubernetes/kubeadm/blob/main/kinder/hack/verify-imports-order.sh
+
 Tool for formatting golang import lines
 
 ```
